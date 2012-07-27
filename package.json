@@ -1,0 +1,34 @@
+{
+    "name":"distributed-backbone",
+    "version":"0.0.1",
+    "description":"Concurrent editing of documents from multiple devices using backbone.js",
+    "keywords":["html", "html5", "express", "connect", "application", "server"],
+    "contributors": [
+        "Joachim Kainz <jfk@jolira.com> (http://www.jolira.com)"
+    ],
+    "repository":{
+        "url":"https://github.com/jolira/distributed-backbone.git",
+        "type":"git"
+    },
+    "dependencies":{
+    },
+    "devDependencies":{
+        "debug":"*",
+        "horaa":"*",
+        "vows":"*",
+        "jake":"*",
+        "uglify-js":"*"
+    },
+    "scripts":{
+        "test":"jake test",
+        "prepublish":"npm prune"
+    },
+    "bugs":{
+        "mail":"dev@jolira.com",
+        "url":"http://github.com/jolira/distributed-backbone/issues"
+    },
+    "main":"index",
+    "engines":{
+        "node":">= 0.6.0"
+    }
+}
