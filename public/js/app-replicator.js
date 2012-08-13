@@ -19,34 +19,6 @@
         return url;
     }
 
-    function read(model, options) {
-        var url = getURL(model);
-
-        return open(function(store) {
-            return store.get(url, function(entry) {
-                return options.success(entry);
-            });
-        });
-    }
-
-    function sync(method, model, options) {
-        switch(method) {
-            case 'read':
-                return read(model, options);
-            case 'update':
-                return update(model, options);
-        }
-
-        return app.error("unknown sync method", method);
-    }
-
-    app.replicator = app.replicator || {};
-    app.replicator.Model = app.replicator.Model || Backbone.Model.extend({
-        sync:function (method, model, options) {
-            return sync(method, model, options);
-        }
-    });
-
     function update(localStore, url, key, version, entry) {
         return localStore.get(url, function (versionByID) {
             var id = url + "/" + key;
@@ -77,14 +49,14 @@
         });
     }
 
-    function save(localStore, url, key) {
+    function create(localStore, url, key) {
         var id = url + "/" + key;
 
         return localStore.get(id, function (entry) {
             var start = Date.now();
 
-            return app.middle.emit("replicate-save", id, entry, function (version) {
-                app.log("replicate-save", url, Date.now() - start, id, version);
+            return app.middle.emit("replicate-create", id, entry, function (version) {
+                app.log("replicate-create", url, Date.now() - start, id, version);
 
                 return localStore.get(url, function (versionByID) {
                     if (!versionByID) {
@@ -92,12 +64,124 @@
                     }
 
                     versionByID[key] = version;
-
                     localStore.save(url, versionByID);
                 });
             });
         });
     }
+
+    function removeKey(keys, key, idx) {
+        if (idx >= keys.length) {
+            return;
+        }
+
+        if (_.isEqual(keys[idx], key)) {
+            return keys = keys.splice(idx, 1);
+        }
+
+        return removeKey(keys, key, idx+1);
+    }
+
+    function diff(org, mod) {
+        var orgKeys = _.keys(org),
+            modKeys = _.keys(mod),
+            changed = false,
+            result = {};
+
+        _.each(orgKeys, function(key) {
+            var orgVal = org[key],
+                modVal = mod[key];
+
+            removeKey(modKeys, key, 0);
+
+            if (!_.isEqual(orgVal, modVal)) {
+                changed = true;
+                result[key] = modVal;
+            }
+        });
+        _.each(modKeys, function(key) {
+            var modVal = mod[key];
+
+            changed = true;
+            result[key] = modVal;
+        });
+
+        return result;
+    }
+
+    function toJSON(model) {
+        var data = model.toJSON();
+
+        delete data.id;
+
+        return data;
+    }
+
+    function updateMdl(model, options) {
+        var url = getURL(model);
+
+        return open(function(store) {
+            return store.get(url, function(entry) {
+                var data = toJSON(model),
+                    changes = diff(entry, data);
+
+                if (!changes) {
+                    return options.success({});
+                }
+
+                var start = Date.now();
+
+                return app.middle.emit("replicate-update", url, start, changes, function (data, version) {
+                    app.log("replicate-update", url, Date.now() - start, version);
+
+                    var segments = url.split("/"),
+                        id = segments.pop(),
+                        listURL = segments.join("/");
+
+                    return store.get(listURL, function (versionByID) {
+                        if (!versionByID) {
+                            versionByID = {};
+                        }
+
+                        versionByID[id] = version;
+                        store.save(listURL, versionByID);
+
+                        return store.save(url, data, function() {
+                            return options.success(data);
+                        });
+                    });
+                });
+            });
+        });
+    }
+
+    function readMdl(model, options) {
+        var url = getURL(model);
+
+        return open(function(store) {
+            return store.get(url, function(entry) {
+                return options.success(entry);
+            });
+        });
+    }
+
+    function sync(method, model, options) {
+        switch(method) {
+            case 'read':
+                return readMdl(model, options);
+            case 'update':
+                return updateMdl(model, options);
+        }
+
+        return app.error("unknown sync method", method);
+    }
+
+    app.replicator = app.replicator || {};
+    app.replicator.Model = app.replicator.Model || Backbone.Model.extend({
+        sync:function (method, model, options) {
+            return sync(method, model, options);
+        }
+    });
 
     function replicate(localStore, url, cb) {
         return localStore.get(url, function (versionByID) {
@@ -113,8 +197,8 @@
                         case 'update':
                             return update(localStore, url, key, value.version, value.entry);
 
-                        case 'save':
-                            return save(localStore, url, key);
+                        case 'create':
+                            return create(localStore, url, key);
 
                         case 'remove':
                             return remove(localStore, url, key);
@@ -136,144 +220,12 @@
 
             return next();
         });
+
+        app.middle.on("replicator-add", function() {
+            console.log("replicator-add", Array.prototype.slice.call(arguments));
+        });
+        app.middle.on("replicator-update", function() {
+            console.log("replicator-update", Array.prototype.slice.call(arguments));
+        });
     });
 })(window["jolira-app"]);
-/*
- // *******************************************************************************
- // using socket.io for Backbone.sync
- // *******************************************************************************
-
- function open(name, cb) {
- new Lawnchair({ name:name }, cb);
- }
-
- function changedAttributes(model) {
- var changed = model.changedAttributes()
-
- return changed && _.keys(changed);
- }
-
- function readAsync(collection, id, options) {
- return open(collection, function (store) {
- if (id) {
- return store.get(id, function (result) {
- return options && options.success && options.success(result && result.val);
- });
- }
-
- return store.all(function (result) {
- if (!options || !options.success) {
- return;
- }
-
- var found = [];
-
- _.each(result || [], function (result) {
- found.push(result.val);
- });
-
- return options.success(found);
- });
- });
- }
-
- function saveLocal(model, collection, id, options, changed, data) {
- changed = changed || changedAttributes(model);
-
- if (!changed) {
- return;
- }
-
- return open(collection, function (store) {
- data = data || model.toJSON();
-
- return store.save({
- key:id,
- val:data
- }, function (result) {
- app.log("saving locally", collection, result, changed);
- return options && options.success && options.success(result.val);
- });
- });
- }
-
- function saveRemote(method, model, collection, id, options, changed, data) {
- changed = changed || changedAttributes(model);
-
- if (!changed) {
- return;
- }
-
- data = data || model.toJSON();
-
- return app.middle.emit("middle-store", method, collection, id, data, changed, function (err, result) {
- if (err) {
- if (options && options.errror) {
- return options.errror(err);
- }
-
- return app.error("sync failed", collection, id, data, changed, err);
- }
-
- app.log("remote update", result);
-
- if (options && options.success) {
- return options.success(result);
- }
- });
- }
-
- function saveAsync(method, model, collection, id, options, changed, data) {
- changed = changed || changedAttributes(model);
-
- if (!changed) {
- return;
- }
-
- data = data || model.toJSON();
-
- saveRemote(method, model, collection, id, undefined, changed, data);
- saveLocal(model, collection, id, options, changed, data);
- }
-
- function createAsync(method, model, collection, id, options) {
- var data = model.toJSON() || {};
-
- data.id = app.utils.uuid().replace(/-/g, "");
-
- saveAsync(method, model, collection, data.id, options, _.keys(data), data);
- }
-
- function asyncSync(method, model, collection, id, options) {
- if ('read' === method) {
- return readAsync(collection, id, options);
- }
-
- if ("update" === method) {
- return saveAsync(method, model, collection, id, options);
- }
-
- if ("create" === method) {
- return createAsync(method, model, collection, id, options);
- }
- throw new Error("not yet supported");
- }
-
- function getURL(model) {
- return _.isFunction(model.url) ? model.url.call(model) : model.url;
- }
-
- app.middle.sync = function (method, model, options) {
- var url = getURL(model),
- segments = url.split('/'),
- type = segments.shift(),
- collection = segments.shift(),
- id = segments.join('/');
-
- if (type === 'async') {
- return asyncSync(method, model, collection, id, options);
- }
-
- throw new Error("unsupported url " + url);
- };
- */
