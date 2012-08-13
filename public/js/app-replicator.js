@@ -33,13 +33,11 @@
         switch(method) {
             case 'read':
                 return read(model, options);
+            case 'update':
+                return update(model, options);
         }
 
         return app.error("unknown sync method", method);
-        return open(function(localStore) {
-
-        });
-        //app.log(sync, self, method, model, options);
     }
 
     app.replicator = app.replicator || {};
