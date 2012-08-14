@@ -1,9 +1,14 @@
 (function (app) {
     "use strict";
 
+    app.replicator = app.replicator || {};
+
     function open(cb) {
         return app.store("r", cb);
     }
+
+    var events = _.extend({}, Backbone.Events),
+        replicatedURLs = [];
 
     function getURL(model) {
         var url = model.url;
@@ -19,8 +24,16 @@
         return url;
     }
 
-    function update(localStore, url, key, version, entry) {
-        return localStore.get(url, function (versionByID) {
+    app.replicator.animate = app.replicator.animate || function(model) {
+        var url = getURL(model);
+
+        events.on("update:" + url, function(data) {
+            model.set(data);
+        });
+    }
+
+    function createLocal(store, url, key, version, data) {
+        return store.get(url, function (versionByID) {
             var id = url + "/" + key;
 
             if (!versionByID) {
@@ -29,12 +42,31 @@
 
             versionByID[key] = version;
 
-            localStore.save(url, versionByID);
-            localStore.save(id, entry);
+            store.save(url, versionByID);
+            store.save(id, data);
+
+            events.trigger("create:" + url, key, data);
         });
     }
 
-    function remove(localStore, url, key) {
+    function updateLocal(store, url, key, version, data) {
+        return store.get(url, function (versionByID) {
+            var id = url + "/" + key;
+
+            if (!versionByID) {
+                versionByID = {};
+            }
+
+            versionByID[key] = version;
+
+            store.save(url, versionByID);
+            store.save(id, data);
+
+            events.trigger("update:" + id, data);
+        });
+    }
+
+    function removeLocal(localStore, url, key) {
         return localStore.get(url, function (versionByID) {
             var id = url + "/" + key;
 
@@ -46,6 +78,8 @@
 
             localStore.save(url, versionByID);
             localStore.remove(id);
+
+            events.trigger("remove:" + url, key);
         });
     }
 
@@ -176,56 +210,83 @@
         return app.error("unknown sync method", method);
     }
 
-    app.replicator = app.replicator || {};
     app.replicator.Model = app.replicator.Model || Backbone.Model.extend({
         sync:function (method, model, options) {
             return sync(method, model, options);
         }
     });
 
-    function replicate(localStore, url, cb) {
-        return localStore.get(url, function (versionByID) {
-            var start = Date.now();
+    function syncLocal(updates, store, url) {
+        _.each(updates, function (value, key) {
+            switch (value.cmd) {
+                case 'create':
+                    return createLocal(store, url, key, value.version, value.entry);
 
-            return app.middle.emit("replicate", url, versionByID, function (updates) {
-                app.log("replicate", url, Date.now() - start, _.keys(updates));
+                case 'update':
+                    return updateLocal(store, url, key, value.version, value.entry);
 
-                _.each(updates, function (value, key) {
-                    var cmd = value.cmd;
+                case 'remove':
+                    return removeLocal(store, url, key);
+            }
 
-                    switch (cmd) {
-                        case 'update':
-                            return update(localStore, url, key, value.version, value.entry);
+            return app.error("unknown replicate instruction", value.cmd, url, key, value);
+        });
+    }
 
-                        case 'create':
-                            return create(localStore, url, key);
+    function replicate(url) {
+        return open(function(store) {
+            return store.get(url, function (versionByID) {
+                var start = Date.now();
 
-                        case 'remove':
-                            return remove(localStore, url, key);
-                    }
+                return app.middle.emit("replicate", url, versionByID, function (updates) {
+                    app.log("replicate", url, Date.now() - start, _.keys(updates));
 
-                    return app.error("unknown replicate instruction", cmd, url, key, value);
+                    syncLocal(updates, store, url);
                 });
-
-                return cb && cb();
             });
         });
     }
 
     app.starter.$(function (next) {
-        return open(function (localStore) {
-            app.replicator.replicate = function (url, cb) {
-                return replicate(localStore, url, cb);
-            };
+        app.middle.on("replicator-create", function(url, data, version) {
+            return open(function(store) {
+                var segments = url.split("/"),
+                    id = segments.pop(),
+                    listURL = segments.join("/");
 
-            return next();
+                return createLocal(store, listURL, id, version, data);
+            });
         });
+        app.middle.on("replicator-update", function(url, data, version) {
+            return open(function(store) {
+                var segments = url.split("/"),
+                    id = segments.pop(),
+                    listURL = segments.join("/");
 
-        app.middle.on("replicator-add", function() {
-            console.log("replicator-add", Array.prototype.slice.call(arguments));
+                return updateLocal(store, listURL, id, version, data);
+            });
         });
-        app.middle.on("replicator-update", function() {
-            console.log("replicator-update", Array.prototype.slice.call(arguments));
+        app.middle.on("replicator-remove", function(url) {
+            return open(function(store) {
+                var segments = url.split("/"),
+                    id = segments.pop(),
+                    listURL = segments.join("/");
+
+                return removeLocal(store, listURL, id);
+            });
         });
+        app.middle.on("connect", function() {
+            _.each(replicatedURLs, function(url) {
+                replicate(url);
+            });
+        });
+        app.replicator.replicate = function(url) {
+            replicatedURLs.push(url);
+
+            if (app.middle.connected) {
+                replicate(url);
+            }
+        };
+        return next();
     });
 })(window["jolira-app"]);
