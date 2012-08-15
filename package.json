@@ -15,6 +15,7 @@
     },
     "devDependencies":{
         "site-manager":"*",
+        "site-manager-baseline":"*",
         "debug":"*",
         "horaa":"*",
         "vows":"*",

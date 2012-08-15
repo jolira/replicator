@@ -227,6 +227,11 @@
             return sync(method, model, options);
         }
     });
+    app.replicator.Collection = app.replicator.Model || Backbone.Collection.extend({
+        sync:function (method, model, options) {
+            return sync(method, model, options);
+        }
+    });
 
     function syncLocal(updates, store, url) {
         _.each(updates, function (value, key) {
