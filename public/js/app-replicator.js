@@ -17,19 +17,31 @@
             url = url.call(model);
         }
 
-        if (url[0] === '/') {
-            return url.substr(1);
-        }
-
-        return url;
+        return url[0] === '/' ? url.substr(1) : url;
     }
 
-    app.replicator.animate = app.replicator.animate || function(model) {
+    app.replicator.animate = app.replicator.animate || function (model, context) {
         var url = getURL(model);
 
-        events.on("update:" + url, function(data) {
+        events.on("update:" + url, function (data) {
             model.set(data);
-        });
+        }, context || model);
+        events.on("create:" + url, function (id, data) {
+            data.id = id;
+
+            model.add([ data ]);
+        }, context || model);
+        events.on("remove:" + url, function (id) {
+            model.add([
+                { id:id }
+            ]);
+        }, context || model);
+    }
+
+    app.replicator.disanimate = app.replicator.disanimate || function (model, context) {
+        var url = getURL(model);
+
+        events.off("update:" + url, undefined, context || model);
     }
 
     function createLocal(store, url, key, version, data) {
@@ -113,7 +125,7 @@
             return keys = keys.splice(idx, 1);
         }
 
-        return removeKey(keys, key, idx+1);
+        return removeKey(keys, key, idx + 1);
     }
 
     function diff(org, mod) {
@@ -122,7 +134,7 @@
             changed = false,
             result = {};
 
-        _.each(orgKeys, function(key) {
+        _.each(orgKeys, function (key) {
             var orgVal = org[key],
                 modVal = mod[key];
 
@@ -133,7 +145,7 @@
                 result[key] = modVal;
             }
         });
-        _.each(modKeys, function(key) {
+        _.each(modKeys, function (key) {
             var modVal = mod[key];
 
             changed = true;
@@ -154,8 +166,8 @@
     function updateMdl(model, options) {
         var url = getURL(model);
 
-        return open(function(store) {
-            return store.get(url, function(entry) {
+        return open(function (store) {
+            return store.get(url, function (entry) {
                 var data = toJSON(model),
                     changes = diff(entry, data);
 
@@ -180,7 +192,7 @@
                         versionByID[id] = version;
                         store.save(listURL, versionByID);
 
-                        return store.save(url, data, function() {
+                        return store.save(url, data, function () {
                             return options.success(data);
                         });
                     });
@@ -192,15 +204,15 @@
     function readMdl(model, options) {
         var url = getURL(model);
 
-        return open(function(store) {
-            return store.get(url, function(entry) {
+        return open(function (store) {
+            return store.get(url, function (entry) {
                 return options.success(entry);
             });
         });
     }
 
     function sync(method, model, options) {
-        switch(method) {
+        switch (method) {
             case 'read':
                 return readMdl(model, options);
             case 'update':
@@ -234,7 +246,7 @@
     }
 
     function replicate(url) {
-        return open(function(store) {
+        return open(function (store) {
             return store.get(url, function (versionByID) {
                 var start = Date.now();
 
@@ -248,8 +260,8 @@
     }
 
     app.starter.$(function (next) {
-        app.middle.on("replicator-create", function(url, data, version) {
-            return open(function(store) {
+        app.middle.on("replicator-create", function (url, data, version) {
+            return open(function (store) {
                 var segments = url.split("/"),
                     id = segments.pop(),
                     listURL = segments.join("/");
@@ -257,8 +269,8 @@
                 return createLocal(store, listURL, id, version, data);
             });
         });
-        app.middle.on("replicator-update", function(url, data, version) {
-            return open(function(store) {
+        app.middle.on("replicator-update", function (url, data, version) {
+            return open(function (store) {
                 var segments = url.split("/"),
                     id = segments.pop(),
                     listURL = segments.join("/");
@@ -266,8 +278,8 @@
                 return updateLocal(store, listURL, id, version, data);
             });
         });
-        app.middle.on("replicator-remove", function(url) {
-            return open(function(store) {
+        app.middle.on("replicator-remove", function (url) {
+            return open(function (store) {
                 var segments = url.split("/"),
                     id = segments.pop(),
                     listURL = segments.join("/");
@@ -275,12 +287,12 @@
                 return removeLocal(store, listURL, id);
             });
         });
-        app.middle.on("connect", function() {
-            _.each(replicatedURLs, function(url) {
+        app.middle.on("connect", function () {
+            _.each(replicatedURLs, function (url) {
                 replicate(url);
             });
         });
-        app.replicator.replicate = function(url) {
+        app.replicator.replicate = function (url) {
             replicatedURLs.push(url);
 
             if (app.middle.connected) {
