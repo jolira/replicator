@@ -1,6 +1,6 @@
 {
     "name":"jolira-replicator",
-    "version":"0.1.1",
+    "version":"0.1.2",
     "description":"Concurrent editing of documents from multiple devices using backbone.js",
     "keywords":["html", "html5", "express", "connect", "application", "server"],
     "contributors": [
