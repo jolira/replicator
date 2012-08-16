@@ -7,9 +7,6 @@
         return app.store("r", cb);
     }
 
-    var events = _.extend({}, Backbone.Events),
-        replicatedURLs = [];
-
     function getURL(model) {
         var url = model.url;
 
@@ -18,6 +15,191 @@
         }
 
         return url[0] === '/' ? url.substr(1) : url;
+    }
+
+    function removeIfPresent(keys, key, idx) {
+        if (idx >= keys.length) {
+            return undefined;
+        }
+
+        if (_.isEqual(keys[idx], key)) {
+            return keys = keys.splice(idx, 1);
+        }
+
+        return removeIfPresent(keys, key, idx + 1);
+    }
+
+    function diffData(org, mod) {
+        if (!org) {
+            return mod;
+        }
+
+        var orgKeys = _.keys(org),
+            modKeys = _.keys(mod),
+            changed = false,
+            result = {};
+
+        _.each(orgKeys, function (key) {
+            var orgVal = org[key],
+                modVal = mod[key];
+
+            removeIfPresent(modKeys, key, 0);
+
+            if (!_.isEqual(orgVal, modVal)) {
+                changed = true;
+                result[key] = modVal;
+            }
+        });
+        _.each(modKeys, function (key) {
+            var modVal = mod[key];
+
+            changed = true;
+            result[key] = modVal;
+        });
+
+        return changed ? result : undefined;
+    }
+
+    function toData(model) {
+        var data = model.toJSON();
+
+        delete data.id;
+
+        return data;
+    }
+
+    function storeVersion(store, listURL, id, version, cb) {
+        return store.get(listURL, function (versionByID) {
+            if (!versionByID) {
+                versionByID = {};
+            }
+
+            var previousVersion = versionByID[id];
+
+            if (version) {
+                versionByID[id] = version;
+            }
+            else {
+                delete versionByID[id];
+            }
+
+            return store.save(listURL, versionByID, function () {
+                cb(previousVersion);
+            });
+        });
+    }
+
+    function save(store, model, options) {
+        var url = getURL(model);
+
+        return store.get(url, function (existing) {
+            var data = toData(model),
+                modifications = diffData(existing, data);
+
+            if (!modifications) {
+                return options.success(data);
+            }
+
+            app.middle.emit("replicate", "store", url, Date.now(), modifications);
+
+            return store.save(url, data, function () {
+                return options.success(data);
+            });
+        });
+    }
+
+    function update(model, options) {
+        return open(function (store) {
+            return save(store, model, options);
+        });
+    }
+
+    function create(model, options) {
+        return open(function (store) {
+            var id = app.utils.uuid(),
+                listURL = getURL(model);
+
+            return storeVersion(store, listURL, id, "new", function () {
+                model.id = id;
+
+                return save(store, model, options);
+            });
+        });
+    }
+
+    function read(model, options) {
+        var url = getURL(model);
+
+        return open(function (store) {
+            return store.get(url, function (entry) {
+                return options.success(entry || {});
+            });
+        });
+    }
+
+    function remove(model, options) {
+        return open(function (store) {
+            var url = getURL(model),
+                segments = url.split("/"),
+                id = segments.pop(),
+                listURL = segments.join("/");
+
+            return storeVersion(store, listURL, id, undefined, function () {
+                app.middle.emit("replicate", "store", url, Date.now(), undefined);
+
+                return store.remove(url, function () {
+                    return options.success(data);
+                });
+            });
+        });
+    }
+
+    function sync(method, model, options) {
+        switch (method) {
+            case 'read':
+                return read(model, options);
+            case 'create':
+                return create(model, options);
+            case 'update':
+                return update(model, options);
+            case 'delete':
+                return remove(model, options);
+        }
+
+        return app.error("unsupported backbone sync method", method);
+    }
+
+    function replicate(url) {
+        return open(function (store) {
+            return store.get(url, function (versionByID) {
+                return app.middle.emit("replicate", "sync", url, versionByID);
+            });
+        });
+    }
+
+    var events = _.extend({}, Backbone.Events);
+
+    function applyReplicate(listURL, id, version, data) {
+        return open(function (store) {
+            return storeVersion(store, listURL, id, version, function (previousVersion) {
+                if (!version) {
+                    store.remove(listURL + "/" + id);
+
+                    return events.trigger("remove:" + listURL, id);
+                }
+
+                var url = listURL + "/" + id;
+
+                store.save(url, data);
+                events.trigger("update:" + url, data);
+
+                if (!previousVersion) {
+                    events.trigger("create:" + listURL, id, data);
+                }
+
+                return undefined;
+            });
+        });
     }
 
     app.replicator.animate = app.replicator.animate || function (model, context) {
@@ -32,266 +214,41 @@
             model.add([ data ]);
         }, context || model);
         events.on("remove:" + url, function (id) {
-            model.add([
+            model.remove([
                 { id:id }
             ]);
         }, context || model);
-    }
-
+    };
     app.replicator.disanimate = app.replicator.disanimate || function (model, context) {
         var url = getURL(model);
 
         events.off("update:" + url, undefined, context || model);
-    }
-
-    function createLocal(store, url, key, version, data) {
-        return store.get(url, function (versionByID) {
-            var id = url + "/" + key;
-
-            if (!versionByID) {
-                versionByID = {};
-            }
-
-            versionByID[key] = version;
-
-            store.save(url, versionByID);
-            store.save(id, data);
-
-            events.trigger("create:" + url, key, data);
-        });
-    }
-
-    function updateLocal(store, url, key, version, data) {
-        return store.get(url, function (versionByID) {
-            var id = url + "/" + key;
-
-            if (!versionByID) {
-                versionByID = {};
-            }
-
-            versionByID[key] = version;
-
-            store.save(url, versionByID);
-            store.save(id, data);
-
-            events.trigger("update:" + id, data);
-        });
-    }
-
-    function removeLocal(localStore, url, key) {
-        return localStore.get(url, function (versionByID) {
-            var id = url + "/" + key;
-
-            if (!versionByID) {
-                versionByID = {};
-            }
-
-            delete versionByID[key];
-
-            localStore.save(url, versionByID);
-            localStore.remove(id);
-
-            events.trigger("remove:" + url, key);
-        });
-    }
-
-    function create(localStore, url, key) {
-        var id = url + "/" + key;
-
-        return localStore.get(id, function (entry) {
-            var start = Date.now();
-
-            return app.middle.emit("replicate-create", id, entry, function (version) {
-                app.log("replicate-create", url, Date.now() - start, id, version);
-
-                return localStore.get(url, function (versionByID) {
-                    if (!versionByID) {
-                        versionByID = {};
-                    }
-
-                    versionByID[key] = version;
-                    localStore.save(url, versionByID);
-                });
-            });
-        });
-    }
-
-    function removeKey(keys, key, idx) {
-        if (idx >= keys.length) {
-            return;
-        }
-
-        if (_.isEqual(keys[idx], key)) {
-            return keys = keys.splice(idx, 1);
-        }
-
-        return removeKey(keys, key, idx + 1);
-    }
-
-    function diff(org, mod) {
-        var orgKeys = _.keys(org),
-            modKeys = _.keys(mod),
-            changed = false,
-            result = {};
-
-        _.each(orgKeys, function (key) {
-            var orgVal = org[key],
-                modVal = mod[key];
-
-            removeKey(modKeys, key, 0);
-
-            if (!_.isEqual(orgVal, modVal)) {
-                changed = true;
-                result[key] = modVal;
-            }
-        });
-        _.each(modKeys, function (key) {
-            var modVal = mod[key];
-
-            changed = true;
-            result[key] = modVal;
-        });
-
-        return result;
-    }
-
-    function toJSON(model) {
-        var data = model.toJSON();
-
-        delete data.id;
-
-        return data;
-    }
-
-    function updateMdl(model, options) {
-        var url = getURL(model);
-
-        return open(function (store) {
-            return store.get(url, function (entry) {
-                var data = toJSON(model),
-                    changes = diff(entry, data);
-
-                if (!changes) {
-                    return options.success({});
-                }
-
-                var start = Date.now();
-
-                return app.middle.emit("replicate-update", url, start, changes, function (data, version) {
-                    app.log("replicate-update", url, Date.now() - start, version);
-
-                    var segments = url.split("/"),
-                        id = segments.pop(),
-                        listURL = segments.join("/");
-
-                    return store.get(listURL, function (versionByID) {
-                        if (!versionByID) {
-                            versionByID = {};
-                        }
-
-                        versionByID[id] = version;
-                        store.save(listURL, versionByID);
-
-                        return store.save(url, data, function () {
-                            return options.success(data);
-                        });
-                    });
-                });
-            });
-        });
-    }
-
-    function readMdl(model, options) {
-        var url = getURL(model);
-
-        return open(function (store) {
-            return store.get(url, function (entry) {
-                return options.success(entry);
-            });
-        });
-    }
-
-    function sync(method, model, options) {
-        switch (method) {
-            case 'read':
-                return readMdl(model, options);
-            case 'update':
-                return updateMdl(model, options);
-        }
-
-        return app.error("unknown sync method", method);
-    }
+        events.off("create:" + url, undefined, context || model);
+        events.off("remove:" + url, undefined, context || model);
+    };
 
     app.replicator.Model = app.replicator.Model || Backbone.Model.extend({
         sync:function (method, model, options) {
             return sync(method, model, options);
         }
     });
-    app.replicator.Collection = app.replicator.Model || Backbone.Collection.extend({
+    app.replicator.Collection = app.replicator.Collection || Backbone.Collection.extend({
         sync:function (method, model, options) {
             return sync(method, model, options);
         }
     });
 
-    function syncLocal(updates, store, url) {
-        _.each(updates, function (value, key) {
-            switch (value.cmd) {
-                case 'create':
-                    return createLocal(store, url, key, value.version, value.entry);
-
-                case 'update':
-                    return updateLocal(store, url, key, value.version, value.entry);
-
-                case 'remove':
-                    return removeLocal(store, url, key);
-            }
-
-            return app.error("unknown replicate instruction", value.cmd, url, key, value);
-        });
-    }
-
-    function replicate(url) {
-        return open(function (store) {
-            return store.get(url, function (versionByID) {
-                var start = Date.now();
-
-                return app.middle.emit("replicate", url, versionByID, function (updates) {
-                    app.log("replicate", url, Date.now() - start, _.keys(updates));
-
-                    syncLocal(updates, store, url);
-                });
-            });
-        });
-    }
-
     app.starter.$(function (next) {
-        app.middle.on("replicator-create", function (url, data, version) {
-            return open(function (store) {
-                var segments = url.split("/"),
-                    id = segments.pop(),
-                    listURL = segments.join("/");
+        app.middle.on("replicate", function (url, data, version) {
+            var segments = url.split("/"),
+                id = segments.pop(),
+                listURL = segments.join("/");
 
-                return createLocal(store, listURL, id, version, data);
-            });
+            return applyReplicate(listURL, id, version, data);
         });
-        app.middle.on("replicator-update", function (url, data, version) {
-            return open(function (store) {
-                var segments = url.split("/"),
-                    id = segments.pop(),
-                    listURL = segments.join("/");
 
-                return updateLocal(store, listURL, id, version, data);
-            });
-        });
-        app.middle.on("replicator-remove", function (url) {
-            return open(function (store) {
-                var segments = url.split("/"),
-                    id = segments.pop(),
-                    listURL = segments.join("/");
+        var replicatedURLs = [];
 
-                return removeLocal(store, listURL, id);
-            });
-        });
         app.middle.on("connect", function () {
             _.each(replicatedURLs, function (url) {
                 replicate(url);
@@ -304,6 +261,7 @@
                 replicate(url);
             }
         };
+
         return next();
     });
 })(window["jolira-app"]);
