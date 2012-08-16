@@ -17,16 +17,28 @@
         return url[0] === '/' ? url.substr(1) : url;
     }
 
-    function removeIfPresent(keys, key, idx) {
+    function addIfAbsent(array, elem, idx) {
+        if (idx >= array.length) {
+            return array.push(elem);
+        }
+
+        if (array[idx] === elem) {
+            return false;
+        }
+
+        return addIfAbsent(array, elem, idx + 1);
+    }
+
+    function removeIfPresent(keys, elem, idx) {
         if (idx >= keys.length) {
             return undefined;
         }
 
-        if (_.isEqual(keys[idx], key)) {
+        if (_.isEqual(keys[idx], elem)) {
             return keys = keys.splice(idx, 1);
         }
 
-        return removeIfPresent(keys, key, idx + 1);
+        return removeIfPresent(keys, elem, idx + 1);
     }
 
     function diffData(org, mod) {
@@ -279,9 +291,9 @@
             });
         });
         app.replicator.replicate = function (url) {
-            replicatedURLs.push(url);
+            var success = addIfAbsent(replicatedURLs, url, 0);
 
-            if (app.middle.connected) {
+            if (success && app.middle.connected) {
                 replicate(url);
             }
         };
