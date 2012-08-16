@@ -180,7 +180,7 @@
 
     var events = _.extend({}, Backbone.Events);
 
-    function applyReplicate(listURL, id, version, data) {
+    function applyReplicate(listURL, id, data, version) {
         return open(function (store) {
             return storeVersion(store, listURL, id, version, function (previousVersion) {
                 if (!version) {
@@ -245,7 +245,7 @@
                 id = segments.pop(),
                 listURL = segments.join("/");
 
-            return applyReplicate(listURL, id, version, data);
+            return applyReplicate(listURL, id, data, version);
         });
 
         var replicatedURLs = [];
