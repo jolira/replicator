@@ -116,7 +116,8 @@
 
     function create(model, options) {
         return open(function (store) {
-            var id = app.utils.uuid(),
+            var uuid = app.utils.uuid(),
+                id = uuid.replace(/-/g, ""),
                 listURL = getURL(model);
 
             return storeVersion(store, listURL, id, "new", function () {
