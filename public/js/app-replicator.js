@@ -128,12 +128,35 @@
         });
     }
 
-    function read(model, options) {
-        var url = getURL(model);
+    function readCollection(store, listURL, versionByID, options) {
+        if (!versionByID) {
+            return options.success([]);
+        }
 
+        var collection = [];
+
+        _.each(versionByID, function(version, id) {
+            var url = listURL + "/" + id;
+
+            return store.get(url, function (data) {
+                data.id = id;
+
+                collection.push(data);
+            });
+        });
+
+        return options.success(collection);
+    }
+
+    function read(model, options) {
         return open(function (store) {
-            return store.get(url, function (entry) {
-                return options.success(entry || {});
+            var url = getURL(model);
+
+            return store.get(url, function (data) {
+                if (model.models) {
+                    return readCollection(store, url, data, options);
+                }
+                return options.success(data || {});
             });
         });
     }
