@@ -266,6 +266,14 @@
     app.replicator.Model = app.replicator.Model || Backbone.Model.extend({
         sync:function (method, model, options) {
             return sync(method, model, options);
+        },
+        set:function () {
+            var args = Array.prototype.slice.call(arguments),
+                url = getURL(this);
+
+            app.log("set", url, args);
+
+            return Backbone.Model.prototype.set.apply(this, args);
         }
     });
     app.replicator.Collection = app.replicator.Collection || Backbone.Collection.extend({
