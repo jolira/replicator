@@ -29,49 +29,6 @@
         return addIfAbsent(array, elem, idx + 1);
     }
 
-    function removeIfPresent(keys, elem, idx) {
-        if (idx >= keys.length) {
-            return undefined;
-        }
-
-        if (_.isEqual(keys[idx], elem)) {
-            return keys = keys.splice(idx, 1);
-        }
-
-        return removeIfPresent(keys, elem, idx + 1);
-    }
-
-    function diffData(org, mod) {
-        if (!org) {
-            return mod;
-        }
-
-        var orgKeys = _.keys(org),
-            modKeys = _.keys(mod),
-            changed = false,
-            result = {};
-
-        _.each(orgKeys, function (key) {
-            var orgVal = org[key],
-                modVal = mod[key];
-
-            removeIfPresent(modKeys, key, 0);
-
-            if (!_.isEqual(orgVal, modVal)) {
-                changed = true;
-                result[key] = modVal;
-            }
-        });
-        _.each(modKeys, function (key) {
-            var modVal = mod[key];
-
-            changed = true;
-            result[key] = modVal;
-        });
-
-        return changed ? result : undefined;
-    }
-
     function toData(model) {
         var data = model.toJSON();
 
@@ -104,17 +61,21 @@
     function save(store, model, options) {
         var url = getURL(model);
 
-        return store.get(url, function (existing) {
-            var data = toData(model),
-                modifications = diffData(existing, data);
+        var mods = model.modifications;
 
-            if (!modifications) {
-                return options.success(data);
-            }
+        if (!mods) {
+            return options.success(data);
+        }
 
-            app.middle.emit("replicate", "store", url, Date.now(), modifications);
+        model.modifications = undefined;
+
+        return store.get(url, function (data) {
+            _.each(mods, function(val, attr) {
+                data[attr] = val;
+            });
 
             return store.save(url, data, function () {
+                app.middle.emit("replicate", "store", url, Date.now(), mods);
                 return options.success(data);
             });
         });
@@ -267,13 +228,21 @@
         sync:function (method, model, options) {
             return sync(method, model, options);
         },
-        set:function () {
-            var args = Array.prototype.slice.call(arguments),
-                url = getURL(this);
+        trigger:function(event) {
+            var match = event.match(/^change:(.+)$/);
 
-            app.log("set", url, args);
+            if (match) {
+                var attribute = match[1],
+                    modifications = this.modifications || (this.modifications = {}),
+                    value = arguments[2],
+                    url = getURL(this);
 
-            return Backbone.Model.prototype.set.apply(this, args);
+                app.log("replicated model changed", url, attribute, value);
+
+                modifications[attribute] = value;
+            }
+
+            return Backbone.Model.prototype.trigger.apply(this, arguments);
         }
     });
     app.replicator.Collection = app.replicator.Collection || Backbone.Collection.extend({
