@@ -203,7 +203,14 @@
         var url = getURL(model);
 
         events.on("update:" + url, function (data) {
-            model.set(data);
+            model.replicating = true;
+
+            try {
+                model.set(data);
+            }
+            finally {
+                delete model.replicating;
+            }
         }, context || model);
         events.on("create:" + url, function (id, data) {
             data.id = id;
@@ -239,7 +246,9 @@
 
                 app.log("replicated model changed", url, attribute, value);
 
-                modifications[attribute] = value;
+                if (!model.replicating) {
+                    modifications[attribute] = value;
+                }
             }
 
             return Backbone.Model.prototype.trigger.apply(this, arguments);
