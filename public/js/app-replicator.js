@@ -64,7 +64,7 @@
         var mods = model.modifications;
 
         if (!mods) {
-            return options.success(data);
+            return options.success({});
         }
 
         model.modifications = undefined;
@@ -112,6 +112,10 @@
             var url = listURL + "/" + id;
 
             return store.get(url, function (data) {
+                if (!data) {
+                    data = {};
+                }
+
                 data.id = id;
 
                 collection.push(data);
