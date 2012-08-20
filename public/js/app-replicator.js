@@ -70,6 +70,10 @@
         model.modifications = undefined;
 
         return store.get(url, function (data) {
+            if (!data) {
+                data = {};
+            }
+
             _.each(mods, function(val, attr) {
                 data[attr] = val;
             });
