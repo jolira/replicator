@@ -246,7 +246,7 @@
 
                 app.log("replicated model changed", url, attribute, value);
 
-                if (!model.replicating) {
+                if (!this.replicating) {
                     modifications[attribute] = value;
                 }
             }
