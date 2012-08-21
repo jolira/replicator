@@ -29,14 +29,6 @@
         return addIfAbsent(array, elem, idx + 1);
     }
 
-    function toData(model) {
-        var data = model.toJSON();
-
-        delete data.id;
-
-        return data;
-    }
-
     function storeVersion(store, listURL, id, version, cb) {
         return store.get(listURL, function (versionByID) {
             if (!versionByID) {
@@ -153,7 +145,7 @@
                 app.middle.emit("replicate", "store", url, Date.now(), undefined);
 
                 return store.remove(url, function () {
-                    return options.success(data);
+                    return options.success({});
                 });
             });
         });
@@ -199,7 +191,7 @@
                 events.trigger("update:" + url, data);
 
                 if (!previousVersion) {
-                    events.trigger("create:" + listURL, id, data);
+                    events.trigger("add:" + listURL, id, data);
                 }
 
                 return undefined;
@@ -209,6 +201,18 @@
 
     app.replicator.animate = app.replicator.animate || function (model, context) {
         var url = getURL(model);
+
+        model.on("reset", function() {
+            _.each(model.models || [], function(model) {
+                app.replicator.animate(model, context);
+            });
+        }, context);
+        model.on("add", function(model) {
+            app.replicator.animate(model, context);
+        });
+        model.on("remove", function(model) {
+            app.replicator.disanimate(model, context);
+        });
 
         events.on("update:" + url, function (data) {
             model.replicating = true;
@@ -220,7 +224,7 @@
                 delete model.replicating;
             }
         }, context || model);
-        events.on("create:" + url, function (id, data) {
+        events.on("add:" + url, function (id, data) {
             data.id = id;
 
             model.add([ data ]);
@@ -235,8 +239,8 @@
         var url = getURL(model);
 
         events.off("update:" + url, undefined, context || model);
-        events.off("create:" + url, undefined, context || model);
         events.off("remove:" + url, undefined, context || model);
+        events.off("add:" + url, undefined, context || model);
     };
 
     app.replicator.Model = app.replicator.Model || Backbone.Model.extend({
@@ -254,7 +258,7 @@
 
                 app.log("replicated model changed", url, attribute, value);
 
-                if (!this.replicating) {
+                if (!this.replicating && attribute !== 'id') {
                     modifications[attribute] = value;
                 }
             }
