@@ -214,26 +214,32 @@
             app.replicator.disanimate(model, context);
         });
 
-        events.on("update:" + url, function (data) {
-            model.replicating = true;
+        if (model.set) {
+            events.on("update:" + url, function (data) {
+                model.replicating = true;
 
-            try {
-                model.set(data);
-            }
-            finally {
-                delete model.replicating;
-            }
-        }, context || model);
-        events.on("add:" + url, function (id, data) {
-            data.id = id;
+                try {
+                    model.set(data);
+                }
+                finally {
+                    delete model.replicating;
+                }
+            }, context || model);
+        }
+        if (model.add) {
+            events.on("add:" + url, function (id, data) {
+                data.id = id;
 
-            model.add([ data ]);
-        }, context || model);
-        events.on("remove:" + url, function (id) {
-            model.remove([
-                { id:id }
-            ]);
-        }, context || model);
+                model.add([ data ]);
+            }, context || model);
+        }
+        if (model.remove) {
+            events.on("remove:" + url, function (id) {
+                model.remove([
+                    { id:id }
+                ]);
+            }, context || model);
+        }
     };
     app.replicator.disanimate = app.replicator.disanimate || function (model, context) {
         var url = getURL(model);
