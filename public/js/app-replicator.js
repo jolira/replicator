@@ -273,6 +273,7 @@
         }
     });
     app.replicator.Collection = app.replicator.Collection || Backbone.Collection.extend({
+        model:app.replicator.Model,
         sync:function (method, model, options) {
             return sync(method, model, options);
         }
