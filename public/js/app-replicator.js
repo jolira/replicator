@@ -191,7 +191,7 @@
                 events.trigger("update:" + url, data);
 
                 if (!previousVersion) {
-                    events.trigger("add:" + listURL, id, data);
+                    events.trigger("add:" + listURL, id, data || {});
                 }
 
                 return undefined;
@@ -261,8 +261,6 @@
                     modifications = this.modifications || (this.modifications = {}),
                     value = arguments[2],
                     url = getURL(this);
-
-                app.log("replicated model changed", url, attribute, value);
 
                 if (!this.replicating && attribute !== 'id') {
                     modifications[attribute] = value;
